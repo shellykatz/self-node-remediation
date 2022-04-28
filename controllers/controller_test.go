@@ -163,20 +163,21 @@ var _ = Describe("snr Controller", func() {
 			})
 
 			It("Remediation flow", func() {
+				println("ok6")
 				node := verifyNodeIsUnschedulable()
-
+				println("ok7")
 				addUnschedulableTaint(node)
-
+				println("ok8")
 				verifyTimeHasBeenRebootedExists()
-
+				println("ok9")
 				verifyNodeBackup()
-
+				println("ok10")
 				verifyFinalizerExists()
-
+				println("ok11")
 				verifyNoWatchdogFood()
-
+				println("ok12")
 				verifyNodeDeletedAndRestored(beforeSNR)
-
+				println("ok13")
 				verifyNodeIsSchedulable()
 
 				By("Verify that finalizer exists until node updates status")
@@ -199,7 +200,7 @@ var _ = Describe("snr Controller", func() {
 
 				By("Verify that finalizer was removed and SNR can be deleted")
 				testNoFinalizer()
-
+				println("ok7")
 			})
 		})
 
@@ -391,12 +392,17 @@ func addUnschedulableTaint(node *v1.Node) {
 }
 
 func verifyNodeIsUnschedulable() *v1.Node {
+	println("hi1")
 	By("Verify that node was marked as unschedulable")
 	node := &v1.Node{}
+	println("hi2")
 	Eventually(func() (bool, error) {
 		err := k8sClient.Client.Get(context.TODO(), unhealthyNodeNamespacedName, node)
+		println("hi3")
+		println("%t", node.Spec.Unschedulable)
 		return node.Spec.Unschedulable, err
 	}, 5*time.Second, 250*time.Millisecond).Should(BeTrue())
+	println("hi4")
 	return node
 }
 
