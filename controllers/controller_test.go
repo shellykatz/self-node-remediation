@@ -2,6 +2,7 @@ package controllers_test
 
 import (
 	"context"
+	"fmt"
 	"github.com/medik8s/self-node-remediation/controllers"
 	"github.com/medik8s/self-node-remediation/pkg/utils"
 	"k8s.io/api/storage/v1beta1"
@@ -271,6 +272,55 @@ var _ = Describe("snr Controller", func() {
 				return false
 			}, 10*peerUpdateInterval, timeout).Should(BeTrue())
 		})
+	})
+
+	Context("Reconcile failure due to snr with name of non-existing node", func() {
+		var remediationStrategy selfnoderemediationv1alpha1.RemediationStrategyType
+
+		JustBeforeEach(func() {
+			snr = &selfnoderemediationv1alpha1.SelfNodeRemediation{}
+			snr.Name = "incorrect-node-name"
+			snr.Namespace = snrNamespace
+			snr.Spec.RemediationStrategy = remediationStrategy
+			ExpectWithOffset(1, k8sClient.Client.Create(context.TODO(), snr)).To(Succeed(), "failed to create snr CR")
+
+		})
+
+		AfterEach(func() {
+			deleteSNR(snr)
+		})
+
+		Context("NodeDeletion strategy", func() {
+			BeforeEach(func() {
+				remediationStrategy = selfnoderemediationv1alpha1.NodeDeletionRemediationStrategy
+			})
+
+			It("should capture last reconcile error in the status of snr", func() {
+				snr := &selfnoderemediationv1alpha1.SelfNodeRemediation{}
+				snr.Status.LastError = ""
+				snrNamespacedName := client.ObjectKey{Name: "incorrect-node-name", Namespace: snrNamespace}
+				Expect(k8sClient.Get(context.Background(), snrNamespacedName, snr)).To(Succeed())
+
+				fmt.Printf("%v!!!", snr.Status.LastError) //why is it null?
+				//Expect(snr.Status.LastError).Should(Equal(""))
+			})
+		})
+
+		Context("ResourceDeletion strategy", func() {
+			BeforeEach(func() {
+				remediationStrategy = selfnoderemediationv1alpha1.ResourceDeletionRemediationStrategy
+			})
+
+			It("should capture last reconcile error in the status of snr", func() {
+				snr := &selfnoderemediationv1alpha1.SelfNodeRemediation{}
+				snrNamespacedName := client.ObjectKey{Name: "incorrect-node-name", Namespace: snrNamespace}
+				Expect(k8sClient.Get(context.Background(), snrNamespacedName, snr)).To(Succeed())
+
+				fmt.Printf("%v!!!", snr.Status.LastError) //why is it null?
+				//Expect(snr.Status.LastError).Should(Equal(""))
+			})
+		})
+
 	})
 })
 
