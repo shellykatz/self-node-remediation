@@ -1,12 +1,9 @@
 /*
 Copyright 2021.
-
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
-
     http://www.apache.org/licenses/LICENSE-2.0
-
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,6 +15,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -53,6 +51,8 @@ var (
 
 	lastSeenSnrNamespace  string
 	wasLastSeenSnrMachine bool
+
+	untreatableError = errors.New("untreatable error, stop reconciling")
 )
 
 //GetLastSeenSnrNamespace returns the namespace of the last reconciled SNR
@@ -126,18 +126,21 @@ func (r *SelfNodeRemediationReconciler) Reconcile(ctx context.Context, req ctrl.
 	lastSeenSnrNamespace = req.Namespace
 	r.mutex.Unlock()
 
+	result := ctrl.Result{}
+	var err error
+
 	switch snr.Spec.RemediationStrategy {
 	case v1alpha1.NodeDeletionRemediationStrategy:
-		return r.remediateWithNodeDeletion(snr)
+		result, err = r.remediateWithNodeDeletion(snr)
 	case v1alpha1.ResourceDeletionRemediationStrategy:
-		return r.remediateWithResourceDeletion(snr)
+		result, err = r.remediateWithResourceDeletion(snr)
 	default:
 		//this should never happen since we enforce valid values with kubebuilder
 		err := errors.New("unsupported remediation strategy")
 		r.logger.Error(err, "Encountered unsupported remediation strategy. Please check template spec", "strategy", snr.Spec.RemediationStrategy)
-		return ctrl.Result{}, err
 	}
 
+	return result, r.updateSnrStatusLastError(snr, err)
 }
 
 func (r *SelfNodeRemediationReconciler) isFencingCompleted(snr *v1alpha1.SelfNodeRemediation) bool {
@@ -580,10 +583,10 @@ func (r *SelfNodeRemediationReconciler) markNodeAsUnschedulable(node *v1.Node) (
 
 func (r *SelfNodeRemediationReconciler) handleDeletedNode(snr *v1alpha1.SelfNodeRemediation) (ctrl.Result, error) {
 	if snr.Status.NodeBackup == nil {
-		err := errors.New("unhealthy node doesn't exist and there's no backup node to restore")
-		r.logger.Error(err, "remediation failed")
 		// there is nothing we can do about it, stop reconciling
-		return ctrl.Result{}, nil
+		err := fmt.Errorf("unhealthy node doesn't exist and there's no backup node to restore: %w", untreatableError)
+		r.logger.Error(err, "remediation failed")
+		return ctrl.Result{}, err
 	}
 
 	//todo this assumes the node has been deleted on time, but this is not necessarily the case
@@ -623,4 +626,29 @@ func (r *SelfNodeRemediationReconciler) restoreNode(nodeToRestore *v1.Node) (ctr
 	r.logger.Info("node restored successfully", "node name", nodeToRestore.Name)
 	// all done, stop reconciling
 	return ctrl.Result{Requeue: true}, nil
+}
+
+func (r *SelfNodeRemediationReconciler) updateSnrStatusLastError(snr *v1alpha1.SelfNodeRemediation, err error) error {
+	var lastErrorVal string
+
+	if err != nil {
+		lastErrorVal = err.Error()
+	} else {
+		lastErrorVal = "successful reconcile"
+	}
+
+	if snr.Status.LastError != lastErrorVal {
+		snr.Status.LastError = lastErrorVal
+		updateErr := r.Client.Status().Update(context.Background(), snr)
+		if updateErr != nil {
+			r.logger.Error(updateErr, "Failed to update SelfNodeRemediation status")
+		}
+	}
+
+	if errors.Unwrap(err) == untreatableError {
+		// return nil to not enter reconcile again
+		return nil
+	}
+
+	return err
 }
